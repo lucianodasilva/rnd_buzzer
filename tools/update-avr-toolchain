@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+
+# set strict variable mode
+set -u
+
+function error {
+	>&2 echo "$1"
+}
+
+function on_fail {
+    error "$1"
+    exit 1
+}
+
+extract () {
+	local dest_path="$1"
+	local file="$2"
+
+	if [[ ! -d "$dest_path" ]]; then
+		error "'$dest_path' is not a valid directory"
+		return 1
+	fi
+
+	if [[ -f "$file" ]]; then
+		# copy file to avoid loosing original
+		cp "$file" "$dest_path"
+		cd "$dest_path" > /dev/null || return 1
+
+		# get new file path
+		file="$dest_path/${file##*/}"
+
+		case "$file" in
+			*.tar.*)	tar xf "$file"		;;
+			*.bz2)		bunzip2 "$file"		;;
+			*.rar)		rar x "$file"		;;
+			*.gz)		gunzip "$file"		;;
+			*.tar)		tar xf "$file"		;;
+			*.tbz2)		tar xjf "$file"		;;
+			*.tgz)		tar xzf "$file"		;;
+			*.zip)		unzip "$file"		;;
+			*.Z)		uncompress "$file"	;;
+			*.7z)		7z x "$file"		;;
+			*)			error "'$file' type not supported!" ;;
+		esac
+
+		# try to remove copy
+		rm "$file" > /dev/null || return 1
+		# restore original path
+		cd - > /dev/null || return 1
+	else
+		error "'$file' is not a valid file"
+	fi
+}
+
+function show_usage {
+echo "
+    Usage: $0 [options] [toolchain] [priority]
+        --prefix [path]             - set prefix folder [optional, defaults to /opt/gcc-arm]
+        -h, --help                  - displays this text
+"
+}
+
+if [ "$EUID" -ne 0 ] ; then
+	error "Please run script as root"
+	exit
+fi
+
+declare work_path=""
+declare toolchain=""
+declare prefix="/opt/avr-gcc"
+declare priority=""
+
+# parse arguments
+declare OPTIONS="p:,h"
+declare LONGOPTS="prefix:,help"
+
+! PARSED=$(getopt --options=$OPTIONS --longoptions=$LONGOPTS --name "$0" -- "$@")
+if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+	show_usage
+	exit 2
+fi
+
+eval set -- "$PARSED"
+while true; do
+	case "$1" in
+		-p|--prefix)
+			prefix="$2";
+			shift 2
+			;;
+		-h|--help)
+			show_usage
+			exit 0
+			;;
+		--)
+			shift
+			break
+			;;
+		*)
+			error "Programming error"
+			;;
+	esac
+done
+
+if [  $# -ne 2 ]; then
+	error "Command line arguments missing";
+	show_usage
+	exit 1
+fi
+
+toolchain=$1
+priority=$2
+
+# create work path
+work_path=$(mktemp -d)
+echo "Working at: $work_path"
+
+if [[ ! -d "$prefix" ]] ; then
+	mkdir -p "$prefix" || on_fail "Failed creating prefix path"
+fi
+
+# extract toolchain into work path
+echo "Extracting toolchain"
+extract "$work_path" "$toolchain" || on_fail "Failed extracting toolchain file"
+
+{
+	cd "$work_path" > /dev/null
+	pwd
+	cd ./* > /dev/null
+} || on_fail "Failed to access working path"
+
+declare gcc_info="$(command ./bin/*-gcc -v -E 2>&1)"
+
+declare gcc_triplet="$(sed -n 's/^.*Target:\s*\(\S*\).*$/\1/p' <<< "$gcc_info")"
+declare gcc_version="$(sed -n 's/^.*gcc version\s*\(\S*\).*$/\1/p' <<< "$gcc_info")"
+declare gcc_id="$gcc_triplet-$gcc_version"
+
+echo "GCC Version ID: $gcc_id"
+
+if [[ -d "$prefix/$gcc_id" ]] ; then
+	echo "GCC Version already exists at '$prefix/$gcc_id'"
+	exit 1
+fi
+
+mkdir -p "$prefix/$gcc_id" || on_fail "Failed to create gcc version file at $prefix"
+
+echo "Copying to prefix path"
+cp -r ./* "$prefix/$gcc_id" || on_fail "Copying to $prefix/$gcc_id failed!"
+
+declare bin_path="$prefix/$gcc_id/bin"
+
+update-alternatives --install \
+	"/usr/bin/$gcc_triplet-gcc" "$gcc_triplet-gcc" "$bin_path/$gcc_triplet-gcc" "$priority" \
+	--slave "/usr/bin/$gcc_triplet-g++" "$gcc_triplet-g++" "$bin_path/$gcc_triplet-g++" \
+	--slave "/usr/bin/$gcc_triplet-ar" "$gcc_triplet-ar" "$bin_path/$gcc_triplet-ar" \
+	--slave "/usr/bin/$gcc_triplet-objcopy" "$gcc_triplet-objcopy" "$bin_path/$gcc_triplet-objcopy" \
+	--slave "/usr/bin/$gcc_triplet-objdump" "$gcc_triplet-objdump" "$bin_path/$gcc_triplet-objdump" \
+	--slave "/usr/bin/$gcc_triplet-size" "$gcc_triplet-size" "$bin_path/$gcc_triplet-size" \
+	|| on_fail "Update alternatives failed!"
+
+exit 0
