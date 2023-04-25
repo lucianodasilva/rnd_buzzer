@@ -7,7 +7,8 @@
 
 #define BUZZER_DDR  DDRA
 #define BUZZER_PORT PORTA
-#define BUZZER_PIN  PA5
+#define BUZZER_PUE  PUEA
+#define BUZZER_PIN  PA4
 
 #include <inttypes.h>
 #include <avr/io.h>
@@ -28,7 +29,7 @@ namespace rnd_buzzer {
     constexpr uint32_t  TICK_DURATION_MS        { 60000 };
     //constexpr uint32_t  TICK_DURATION_MS        { 1000 };
 
-    constexpr uint16_t  BUZZER_DURATION_MS      { 4000 };
+    constexpr uint16_t  BUZZER_DURATION_MS      { 2000 };
     //constexpr uint16_t  BUZZER_DURATION_MS    { 250 };
     constexpr uint8_t   BUZZER_REPS             { 3 };
 

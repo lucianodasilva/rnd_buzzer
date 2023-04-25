@@ -18,7 +18,8 @@ namespace rnd_buzzer {
 
     void init_gpio() {
         bit_set (BUZZER_DDR, BUZZER_PIN);
-        bit_set (BUZZER_PORT, BUZZER_PIN);
+        bit_clear (BUZZER_PUE, BUZZER_PIN);
+        bit_clear (BUZZER_PORT, BUZZER_PIN);
     }
 
     void init_timer() {
